@@ -14,29 +14,14 @@ import type { AwsClientConfig, ParsedConfig } from './types.ts';
 export class AwsRdsDatasource extends Datasource {
   static readonly id = 'aws-rds';
 
+  private readonly clients: Record<string, RDSClient> = {};
+
   constructor() {
     super(AwsRdsDatasource.id);
   }
 
   private isRdsFilter(config: Filter | AwsClientConfig): config is Filter {
     return 'Name' in config && 'Values' in config;
-  }
-
-  private getRDSClient({ region, profile }: AwsClientConfig): RDSClient {
-    const { password, token, username } = hostRules.find({
-      hostType: AwsRdsDatasource.id,
-    });
-    return new RDSClient({
-      ...(region && { region }),
-      credentials:
-        username && password
-          ? {
-              accessKeyId: username,
-              secretAccessKey: password,
-              sessionToken: token,
-            }
-          : fromNodeProviderChain(profile ? { profile } : undefined),
-    });
   }
 
   loadConfig(serializedFilter: string): [Filter[], AwsClientConfig] {
@@ -62,7 +47,7 @@ export class AwsRdsDatasource extends Datasource {
     const cmd = new DescribeDBEngineVersionsCommand({
       Filters: filters,
     });
-    const response = await this.getRDSClient(clientConfig).send(cmd);
+    const response = await this.getClient(clientConfig).send(cmd);
     const versions = coerceArray(response.DBEngineVersions);
     return {
       releases: versions
@@ -82,5 +67,26 @@ export class AwsRdsDatasource extends Datasource {
       },
       () => this.fetchReleases(config),
     );
+  }
+
+  private getClient({ region, profile }: AwsClientConfig): RDSClient {
+    const clientKey = `${region ?? 'default'}#${profile ?? 'default'}`;
+    if (!(clientKey in this.clients)) {
+      const { password, token, username } = hostRules.find({
+        hostType: AwsRdsDatasource.id,
+      });
+      this.clients[clientKey] = new RDSClient({
+        ...(region && { region }),
+        credentials:
+          username && password
+            ? {
+                accessKeyId: username,
+                secretAccessKey: password,
+                sessionToken: token,
+              }
+            : fromNodeProviderChain(profile ? { profile } : undefined),
+      });
+    }
+    return this.clients[clientKey];
   }
 }
