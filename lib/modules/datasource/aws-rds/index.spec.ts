@@ -6,10 +6,20 @@ import {
   DescribeDBEngineVersionsCommand,
   RDSClient,
 } from '@aws-sdk/client-rds';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { mockClient } from 'aws-sdk-client-mock';
 import * as hostRules from '../../../util/host-rules.ts';
 import { getPkgReleases } from '../index.ts';
 import { AwsRdsDatasource } from './index.ts';
+
+vi.mock('@aws-sdk/credential-providers', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@aws-sdk/credential-providers')>();
+  return {
+    ...actual,
+    fromNodeProviderChain: vi.fn(actual.fromNodeProviderChain),
+  };
+});
 
 const rdsMock = mockClient(RDSClient);
 
@@ -142,6 +152,70 @@ describe('modules/datasource/aws-rds/index', () => {
       });
     });
 
+    it('prefers host rule credentials over the configured profile', async () => {
+      hostRules.add({
+        hostType: AwsRdsDatasource.id,
+        username: 'access-key-id',
+        password: 'secret-access-key',
+      });
+      mockDescribeVersionsCommand({
+        $metadata: {},
+        DBEngineVersions: [version1],
+      });
+
+      await getPkgReleases({
+        datasource: AwsRdsDatasource.id,
+        packageName:
+          '[{"Name":"engine","Values":["host-rule-profile"]},{"profile":"ignored-profile"}]',
+      });
+
+      expect(fromNodeProviderChain).not.toHaveBeenCalled();
+      const rds = rdsMock.call(0).thisValue as RDSClient;
+      await expect(rds.config.credentials()).resolves.toMatchObject({
+        accessKeyId: 'access-key-id',
+        secretAccessKey: 'secret-access-key',
+      });
+    });
+
+    it('uses the default provider chain without a profile', async () => {
+      mockDescribeVersionsCommand({
+        $metadata: {},
+        DBEngineVersions: [version1],
+      });
+
+      await getPkgReleases({
+        datasource: AwsRdsDatasource.id,
+        packageName: '[{"Name":"engine","Values":["default-chain"]}]',
+      });
+
+      expect(fromNodeProviderChain).toHaveBeenCalledExactlyOnceWith(undefined);
+    });
+
+    it('uses region and profile from the package name', async () => {
+      mockDescribeVersionsCommand({
+        $metadata: {},
+        DBEngineVersions: [version1],
+      });
+
+      const res = await getPkgReleases({
+        datasource: AwsRdsDatasource.id,
+        packageName:
+          '[{"Name":"engine","Values":["region-profile"]},{"region":"eu-central-1","profile":"test-profile"}]',
+      });
+
+      expect(res).toEqual({
+        releases: [{ isDeprecated: false, version: version1.EngineVersion }],
+      });
+      expect(fromNodeProviderChain).toHaveBeenCalledExactlyOnceWith({
+        profile: 'test-profile',
+      });
+      const rds = rdsMock.call(0).thisValue as RDSClient;
+      await expect(rds.config.region()).resolves.toBe('eu-central-1');
+      expect(rdsMock.call(0).args[0].input).toEqual({
+        Filters: [{ Name: 'engine', Values: ['region-profile'] }],
+      });
+    });
+
     it('with one deprecated version', async () => {
       mockDescribeVersionsCommand({
         $metadata: {},
@@ -186,6 +260,27 @@ describe('modules/datasource/aws-rds/index', () => {
           },
         ],
       });
+    });
+  });
+
+  describe('loadConfig()', () => {
+    const rdsDatasource = new AwsRdsDatasource();
+
+    it('loads filters without aws config', () => {
+      const res = rdsDatasource.loadConfig(
+        '[{"Name":"engine","Values":["mysql"]}]',
+      );
+      expect(res).toEqual([[{ Name: 'engine', Values: ['mysql'] }], {}]);
+    });
+
+    it('loads filters with multiple aws configs', () => {
+      const res = rdsDatasource.loadConfig(
+        '[{"Name":"engine","Values":["mysql"]},{"region":"us-west-2"},{"profile":"test-profile"},{"region":"eu-central-1"}]',
+      );
+      expect(res).toEqual([
+        [{ Name: 'engine', Values: ['mysql'] }],
+        { region: 'eu-central-1', profile: 'test-profile' },
+      ]);
     });
   });
 });

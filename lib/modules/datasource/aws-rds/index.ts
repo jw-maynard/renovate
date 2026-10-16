@@ -1,12 +1,15 @@
+import type { Filter } from '@aws-sdk/client-rds';
 import {
   DescribeDBEngineVersionsCommand,
   RDSClient,
 } from '@aws-sdk/client-rds';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { coerceArray } from '../../../util/array.ts';
 import { buildCacheKey } from '../../../util/cache/package/key.ts';
-import * as hostRules from '../../../util/host-rules.ts'; 
+import * as hostRules from '../../../util/host-rules.ts';
 import { Datasource } from '../datasource.ts';
 import type { GetReleasesConfig, ReleaseResult } from '../types.ts';
+import type { AwsClientConfig, ParsedConfig } from './types.ts';
 
 export class AwsRdsDatasource extends Datasource {
   static readonly id = 'aws-rds';
@@ -15,11 +18,16 @@ export class AwsRdsDatasource extends Datasource {
     super(AwsRdsDatasource.id);
   }
 
-  private getRDSClient(): RDSClient {
+  private isRdsFilter(config: Filter | AwsClientConfig): config is Filter {
+    return 'Name' in config && 'Values' in config;
+  }
+
+  private getRDSClient({ region, profile }: AwsClientConfig): RDSClient {
     const { password, token, username } = hostRules.find({
       hostType: AwsRdsDatasource.id,
     });
     return new RDSClient({
+      ...(region && { region }),
       credentials:
         username && password
           ? {
@@ -27,17 +35,34 @@ export class AwsRdsDatasource extends Datasource {
               secretAccessKey: password,
               sessionToken: token,
             }
-          : undefined,
+          : fromNodeProviderChain(profile ? { profile } : undefined),
     });
   }
-  
+
+  loadConfig(serializedFilter: string): [Filter[], AwsClientConfig] {
+    const parsedConfig: ParsedConfig = JSON.parse(serializedFilter);
+    const filters: Filter[] = [];
+    let config: AwsClientConfig = {};
+    for (const elem of parsedConfig) {
+      if (this.isRdsFilter(elem)) {
+        // Separate actual RDS filters from aws client config
+        filters.push(elem);
+      } else {
+        // merge config objects if there are multiple
+        config = Object.assign(config, elem);
+      }
+    }
+    return [filters, config];
+  }
+
   private async fetchReleases({
     packageName: serializedFilter,
   }: GetReleasesConfig): Promise<ReleaseResult | null> {
+    const [filters, clientConfig] = this.loadConfig(serializedFilter);
     const cmd = new DescribeDBEngineVersionsCommand({
-      Filters: JSON.parse(serializedFilter),
+      Filters: filters,
     });
-    const response = await this.getRDSClient().send(cmd);
+    const response = await this.getRDSClient(clientConfig).send(cmd);
     const versions = coerceArray(response.DBEngineVersions);
     return {
       releases: versions
