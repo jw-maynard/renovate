@@ -7,6 +7,7 @@ import {
   RDSClient,
 } from '@aws-sdk/client-rds';
 import { mockClient } from 'aws-sdk-client-mock';
+import * as hostRules from '../../../util/host-rules.ts';
 import { getPkgReleases } from '../index.ts';
 import { AwsRdsDatasource } from './index.ts';
 
@@ -98,6 +99,7 @@ function mockDescribeVersionsCommand(
 describe('modules/datasource/aws-rds/index', () => {
   beforeEach(() => {
     rdsMock.reset();
+    hostRules.clear();
   });
 
   describe('getPkgReleases()', () => {
@@ -110,6 +112,34 @@ describe('modules/datasource/aws-rds/index', () => {
         packageName: '[{"Name":"engine","Values":["mysql"]}]',
       });
       expect(res).toBeNull();
+    });
+
+    it('prefers host rule credentials over the default provider chain', async () => {
+      hostRules.add({
+        hostType: AwsRdsDatasource.id,
+        username: 'access-key-id',
+        password: 'secret-access-key',
+        token: 'session-token',
+      });
+      mockDescribeVersionsCommand({
+        $metadata: {},
+        DBEngineVersions: [version1],
+      });
+
+      await getPkgReleases({
+        datasource: AwsRdsDatasource.id,
+        packageName: '[{"Name":"engine","Values":["host-rule-credentials"]}]',
+      });
+
+      const rds = rdsMock.call(0).thisValue as RDSClient;
+      expect(await rds.config.credentials()).toEqual({
+        accessKeyId: 'access-key-id',
+        secretAccessKey: 'secret-access-key',
+        sessionToken: 'session-token',
+        $source: {
+          CREDENTIALS_CODE: 'e',
+        },
+      });
     });
 
     it('with one deprecated version', async () => {
