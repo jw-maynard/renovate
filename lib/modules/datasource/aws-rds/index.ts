@@ -37,7 +37,7 @@ export class AwsRdsDatasource extends Datasource {
     const cmd = new DescribeDBEngineVersionsCommand({
       Filters: JSON.parse(serializedFilter),
     });
-    const response = await this.getClient().send(cmd);
+    const response = await this.getRDSClient().send(cmd);
     const versions = coerceArray(response.DBEngineVersions);
     return {
       releases: versions
