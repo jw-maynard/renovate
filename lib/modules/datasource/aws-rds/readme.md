@@ -13,23 +13,23 @@ In addition, AWS may pull existing versions if serious problems arise during the
 
 See [Calling AWS Services from Renovate](../../../calling-aws-services.md) for how to configure your credentials.
 
-You can also provide credentials specifically for this datasource with a `hostRules` entry.                                                                                                           
-Set `hostType` to `aws-rds`, `username` to the access key ID, `password` to the secret access key, and optionally `token` to the session token:                                                       
-                                                                                                                                                                                                        
-```json                                                                                                                                                                                               
-{                                                                                                                                                                                                     
-  "hostRules": [                                                                                                                                                                                      
-    {                                                                                                                                                                                                 
-      "hostType": "aws-rds",                                                                                                                                                                          
-      "username": "access-key-id",                                                                                                                                                                    
-      "password": "secret-access-key",                                                                                                                                                                
-      "token": "session-token"                                                                                                                                                                        
-    }                                                                                                                                                                                                 
-  ]                                                                                                                                                                                                   
-}                                                                                                                                                                                                     
+You can also provide credentials specifically for this datasource with a `hostRules` entry.
+Set `hostType` to `aws-rds`, `username` to the access key ID, `password` to the secret access key, and optionally `token` to the session token:
+
+```json
+{
+  "hostRules": [
+    {
+      "hostType": "aws-rds",
+      "username": "access-key-id",
+      "password": "secret-access-key",
+      "token": "session-token"
+    }
+  ]
+}
 ```
-                                                                                                                                                                                                        
-These credentials only apply to AWS RDS lookups.                                                                                                                                                      
+
+These credentials only apply to AWS RDS lookups.
 When this host rule is absent or incomplete, Renovate uses the default AWS credential provider chain.
 
 The minimal IAM privileges required for this datasource are:
