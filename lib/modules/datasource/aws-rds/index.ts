@@ -4,27 +4,40 @@ import {
 } from '@aws-sdk/client-rds';
 import { coerceArray } from '../../../util/array.ts';
 import { buildCacheKey } from '../../../util/cache/package/key.ts';
-import { Lazy } from '../../../util/lazy.ts';
+import * as hostRules from '../../../util/host-rules.ts'; 
 import { Datasource } from '../datasource.ts';
 import type { GetReleasesConfig, ReleaseResult } from '../types.ts';
 
 export class AwsRdsDatasource extends Datasource {
   static readonly id = 'aws-rds';
 
-  private readonly rds: Lazy<RDSClient>;
-
   constructor() {
     super(AwsRdsDatasource.id);
-    this.rds = new Lazy(() => new RDSClient({}));
   }
 
+  private getRDSClient(): RDSClient {
+    const { password, token, username } = hostRules.find({
+      hostType: AwsRdsDatasource.id,
+    });
+    return new RDSClient({
+      credentials:
+        username && password
+          ? {
+              accessKeyId: username,
+              secretAccessKey: password,
+              sessionToken: token,
+            }
+          : undefined,
+    });
+  }
+  
   private async fetchReleases({
     packageName: serializedFilter,
   }: GetReleasesConfig): Promise<ReleaseResult | null> {
     const cmd = new DescribeDBEngineVersionsCommand({
       Filters: JSON.parse(serializedFilter),
     });
-    const response = await this.rds.getValue().send(cmd);
+    const response = await this.getClient().send(cmd);
     const versions = coerceArray(response.DBEngineVersions);
     return {
       releases: versions
