@@ -132,7 +132,7 @@ describe('modules/datasource/aws-rds/index', () => {
       });
 
       const rds = rdsMock.call(0).thisValue as RDSClient;
-      expect(await rds.config.credentials()).toEqual({
+      await expect(rds.config.credentials()).resolves.toEqual({
         accessKeyId: 'access-key-id',
         secretAccessKey: 'secret-access-key',
         sessionToken: 'session-token',
